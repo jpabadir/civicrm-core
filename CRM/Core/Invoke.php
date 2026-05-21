@@ -78,6 +78,7 @@ class CRM_Core_Invoke {
     self::hackMenuRebuild($args);
     self::init($args);
     Civi::dispatcher()->dispatch('civi.invoke.auth', \Civi\Core\Event\GenericHookEvent::create(['args' => $args]));
+    static::checkMaintenanceMode($args);
     $item = self::getItem($args);
     return self::runItem($item);
     // NOTE: runItem() may return HTML, or it may call print+exit.
@@ -302,6 +303,46 @@ class CRM_Core_Invoke {
     if ($coreMaintenanceMode && ($coreMaintenanceMode !== 'inherit')) {
       \CRM_Core_Session::setStatus(ts('CiviCRM is currently in maintenance mode. To deactivate, update the <code>core_maintenance_mode</code> setting.'), ts('Maintenance Mode'), 'warning');
     }
+  }
+
+  /**
+   * When in maintenance mode, block non-bypass users from accessing pages.
+   *
+   * @param array $args
+   */
+  protected static function checkMaintenanceMode(array $args): void {
+    if (!CRM_Utils_System::isMaintenanceMode()) {
+      return;
+    }
+    // AJAX and snippet requests are handled by their own handlers (e.g. CRM_Api4_Page_AJAX).
+    if (($args[1] ?? NULL) === 'ajax' || !empty($_REQUEST['snippet'])) {
+      return;
+    }
+    // Scheduled job execution must continue during maintenance.
+    if (($args[1] ?? NULL) === 'job' && ($args[2] ?? NULL) === 'execute') {
+      return;
+    }
+
+    $maintenanceMessage = ts('This site is in maintenance mode. Please contact the site administrator to change it back to ordinary operation.');
+
+    // Bypass users proceed normally but still see the maintenance notice.
+    if (CRM_Core_Permission::check([['administer CiviCRM system', 'cms:bypass maintenance mode']])) {
+      CRM_Core_Session::setStatus($maintenanceMessage, ts('Maintenance Mode'), 'warning');
+      return;
+    }
+
+    $path = implode('/', $args);
+    // Home and auth paths remain accessible; show the maintenance notice and let the page render.
+    $loginPaths = ['civicrm/home', 'civicrm/login', 'civicrm/login/password', 'civicrm/mfa/totp'];
+    if (in_array($path, $loginPaths)) {
+      CRM_Core_Session::setStatus($maintenanceMessage, ts('Maintenance Mode'), 'warning');
+      return;
+    }
+
+    // Substitute the page content with the maintenance notification.
+    CRM_Core_Config::singleton()->userSystem->renderMaintenanceMessage(
+      '<h2>' . ts('Maintenance Mode') . '</h2><p>' . htmlspecialchars($maintenanceMessage) . '</p>'
+    );
   }
 
   /**
