@@ -99,7 +99,7 @@ class CRM_Event_Form_Registration_ThankYou extends CRM_Event_Form_Registration {
       $this->assignLineItemsToTemplate($lineItemForTemplate);
     }
 
-    if ($invoicing) {
+    if ($invoicing && $this->hasOrder()) {
       $this->assign('totalTaxAmount', $this->getOrder()->getTotalTaxAmount());
     }
     $this->assign('totalAmount', $this->get('totalAmount'));
@@ -113,10 +113,6 @@ class CRM_Event_Form_Registration_ThankYou extends CRM_Event_Form_Registration {
     $this->assign('trxn_id', $this->get('trxnId'));
     $this->assign('isAmountzero', $this->get('totalAmount') <= 0);
 
-    $this->assign('defaultRole', FALSE);
-    if (($this->_params[0]['defaultRole'] ?? NULL) == 1) {
-      $this->assign('defaultRole', TRUE);
-    }
     $defaults = [];
     $fields = [];
     if (!empty($this->_fields)) {

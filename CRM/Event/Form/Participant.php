@@ -959,7 +959,7 @@ class CRM_Event_Form_Participant extends CRM_Contribute_Form_AbstractEditPayment
         $form->add('select', 'payment_instrument_id',
           ts('Payment Method'),
           ['' => ts('- select -')] + CRM_Contribute_BAO_Contribution::buildOptions('payment_instrument_id', 'create'),
-          FALSE, ['onChange' => "return showHideByValue('payment_instrument_id','4','checkNumber','table-row','select',false);"]
+          FALSE
         );
         // don't show transaction id in batch update mode
         $path = CRM_Utils_System::currentPath();
@@ -1188,13 +1188,25 @@ class CRM_Event_Form_Participant extends CRM_Contribute_Form_AbstractEditPayment
     if ($this->isDefined('ExistingContribution')) {
       return $this->lookup('ExistingContribution', 'id');
     }
-    // CRM-12615 - Get payment information from the primary registration if relevant.
-    $participantID = $this->getParticipantValue('registered_by_id') ?: $this->getParticipantID();
+    // dev/core#6813 - Look for the participant's own line items first; fall
+    // back to the registered_by_id record if this fails (CRM-12615).
     $lineItem = LineItem::get(FALSE)
       ->addWhere('entity_table', '=', 'civicrm_participant')
-      ->addWhere('entity_id', '=', $participantID)
+      ->addWhere('entity_id', '=', $this->getParticipantID())
       ->addWhere('contribution_id', 'IS NOT NULL')
       ->execute()->first();
+    if (empty($lineItem)) {
+      // CRM-12615 - Fall back to the primary registration's line item. Retained
+      // as a defensive/legacy-data safety net, not a confirmed-needed path.
+      $primaryParticipantID = $this->getParticipantValue('registered_by_id');
+      if ($primaryParticipantID) {
+        $lineItem = LineItem::get(FALSE)
+          ->addWhere('entity_table', '=', 'civicrm_participant')
+          ->addWhere('entity_id', '=', $primaryParticipantID)
+          ->addWhere('contribution_id', 'IS NOT NULL')
+          ->execute()->first();
+      }
+    }
     if (empty($lineItem)) {
       return NULL;
     }
@@ -1638,7 +1650,7 @@ class CRM_Event_Form_Participant extends CRM_Contribute_Form_AbstractEditPayment
       'total_amount' => $this->getContributionTotalAmount(),
       'revenue_recognition_date' => $this->getRevenueRecognitionDate(),
       'source' => $this->getSourceText(),
-      'non_deductible_amount' => NULL,
+      'non_deductible_amount' => $this->getOrder()->getNonDeductibleAmount(),
       'financial_type_id' => $this->getSubmittedValue('financial_type_id') ?: $this->getEventValue('financial_type_id'),
       'payment_instrument_id' => $this->getPaymentInstrumentID(),
       'is_test' => $this->isTest(),

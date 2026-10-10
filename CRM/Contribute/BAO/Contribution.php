@@ -82,6 +82,30 @@ class CRM_Contribute_BAO_Contribution extends CRM_Contribute_DAO_Contribution im
   public $trxn_result_code;
 
   /**
+   * Get the back-office payment fields (e.g. check_number, card_type_id) to show/save for a
+   * payment instrument, from the payment_instrument option value's 'grouping' column.
+   *
+   * This is for core's own use, leveraging CRM_Core_BAO_OptionValue::getOptionValuesArray()'s
+   * cache. Anything outside core should use the 'payment_instrument_fields' field on the
+   * OptionValue APIv4 entity instead.
+   *
+   * @param int|string $paymentInstrumentID
+   *
+   * @return array
+   *
+   * @internal
+   */
+  public static function getPaymentInstrumentFields($paymentInstrumentID): array {
+    $optionGroupID = CRM_Core_DAO::getFieldValue('CRM_Core_DAO_OptionGroup', 'payment_instrument', 'id', 'name');
+    foreach (CRM_Core_BAO_OptionValue::getOptionValuesArray($optionGroupID) as $optionValue) {
+      if ((string) $optionValue['value'] === (string) $paymentInstrumentID) {
+        return (array) json_decode((string) ($optionValue['grouping'] ?? ''), TRUE);
+      }
+    }
+    return [];
+  }
+
+  /**
    * Takes an associative array and creates a contribution object.
    *
    * the function extract all the params it needs to initialize the create a
@@ -135,8 +159,7 @@ class CRM_Contribute_BAO_Contribution extends CRM_Contribute_DAO_Contribution im
     self::calculateMissingAmountParams($params, $contributionID);
 
     if (!empty($params['payment_instrument_id'])) {
-      $paymentInstruments = CRM_Contribute_PseudoConstant::paymentInstrument('name');
-      if ($params['payment_instrument_id'] != array_search('Check', $paymentInstruments)) {
+      if (!in_array('check_number', self::getPaymentInstrumentFields($params['payment_instrument_id']), TRUE)) {
         $params['check_number'] = 'null';
       }
     }
@@ -250,7 +273,7 @@ class CRM_Contribute_BAO_Contribution extends CRM_Contribute_DAO_Contribution im
         // Note that leveraging this parameter for any other code flow is not supported and
         // is likely to break in future and / or cause serious problems in your data.
         // https://github.com/civicrm/civicrm-core/pull/14673
-        $financialProcessor = new CRM_Contribute_BAO_FinancialProcessor($params['prevContribution'] ?? NULL, $contribution, $previousLineItems, $params['line_item'], $params);
+        $financialProcessor = new CRM_Contribute_BAO_FinancialProcessor($params['prevContribution'] ?? NULL, $contribution, $previousLineItems, reset($params['line_item']), $params);
         $financialProcessor->recordFinancialAccounts($params);
       }
     }
@@ -1098,7 +1121,6 @@ class CRM_Contribute_BAO_Contribution extends CRM_Contribute_DAO_Contribution im
 
     while ($resultDAO->fetch()) {
       $paidByLabel = CRM_Core_PseudoConstant::getLabel('CRM_Core_BAO_FinancialTrxn', 'payment_instrument_id', $resultDAO->payment_instrument_id);
-      $paidByName = CRM_Core_PseudoConstant::getName('CRM_Core_BAO_FinancialTrxn', 'payment_instrument_id', $resultDAO->payment_instrument_id);
       if ($resultDAO->card_type_id) {
         $creditCardType = CRM_Core_PseudoConstant::getLabel('CRM_Core_BAO_FinancialTrxn', 'card_type_id', $resultDAO->card_type_id);
         $pantruncation = '';
@@ -1149,7 +1171,7 @@ class CRM_Contribute_BAO_Contribution extends CRM_Contribute_DAO_Contribution im
         'currency' => $resultDAO->currency,
         'action' => $paymentEditLink,
       ];
-      if ($paidByName === 'Check') {
+      if (in_array('check_number', self::getPaymentInstrumentFields($resultDAO->payment_instrument_id), TRUE)) {
         $val['check_number'] = $resultDAO->check_number;
       }
       else {
@@ -3060,27 +3082,6 @@ INNER JOIN civicrm_activity ON civicrm_activity_contact.activity_id = civicrm_ac
       }
     }
     return $values;
-  }
-
-  /**
-   * Get values of CiviContribute Settings
-   * and check if its enabled or not.
-   * Note: The CiviContribute settings are stored as single entry in civicrm_setting
-   * in serialized form. Usually this should be stored as flat settings for each form fields
-   * as per CiviCRM standards. Since this would take more effort to change the current behaviour of CiviContribute
-   * settings we will live with an inconsistency because it's too hard to change for now.
-   * https://github.com/civicrm/civicrm-core/pull/8562#issuecomment-227874245
-   *
-   * @param string $name
-   *
-   * @return string
-   *
-   * @deprecated since 5.68 will be removed around 5.74.
-   */
-  public static function checkContributeSettings($name) {
-    CRM_Core_Error::deprecatedFunctionWarning('Use \Civi::settings()->get() with the actual setting name');
-    $contributeSettings = Civi::settings()->get('contribution_invoice_settings');
-    return $contributeSettings[$name] ?? NULL;
   }
 
   /**

@@ -78,6 +78,7 @@ class CRM_Core_Invoke {
     self::hackMenuRebuild($args);
     self::init($args);
     Civi::dispatcher()->dispatch('civi.invoke.auth', \Civi\Core\Event\GenericHookEvent::create(['args' => $args]));
+    \Civi\Core\MaintenanceMode::check($args);
     $item = self::getItem($args);
     return self::runItem($item);
     // NOTE: runItem() may return HTML, or it may call print+exit.
@@ -96,8 +97,8 @@ class CRM_Core_Invoke {
       if (CRM_Core_Permission::check('administer CiviCRM')) {
         Civi::rebuild([
           '*' => TRUE,
-          'triggers' => CRM_Utils_Request::retrieve('triggerRebuild', 'Boolean', CRM_Core_DAO::$_nullObject, FALSE, 0, 'GET'),
-          'sessions' => CRM_Utils_Request::retrieve('sessionReset', 'Boolean', CRM_Core_DAO::$_nullObject, FALSE, 0, 'GET'),
+          'triggers' => CRM_Utils_Request::retrieve('triggerRebuild', 'Boolean', NULL, FALSE, 0, 'GET'),
+          'sessions' => CRM_Utils_Request::retrieve('sessionReset', 'Boolean', NULL, FALSE, 0, 'GET'),
         ])->execute();
         CRM_Core_Session::setStatus(ts('Cleared all CiviCRM caches (database, menu, templates)'), ts('Complete'), 'success');
         // exits
@@ -141,7 +142,7 @@ class CRM_Core_Invoke {
     else {
       $path = $args;
     }
-    $item = CRM_Core_Menu::get($path);
+    $item = \Civi::router()->get($path);
 
     return $item;
   }
@@ -241,10 +242,9 @@ class CRM_Core_Invoke {
       return $result;
     }
 
-    // TODO: remove this handling, it is already happening in
-    // CRM_Core_Menu::get
-    CRM_Core_Menu::clear();
-    CRM_Core_Menu::rebuild();
+    // TODO: remove this handling, it is already happening in CRM_Core_Menu::get
+    \Civi::router()->clear()
+      ->rebuild();
     CRM_Core_Session::setStatus(ts('Menu has been rebuilt'), ts('Complete'), 'success');
     return CRM_Utils_System::redirect();
   }
@@ -269,7 +269,7 @@ class CRM_Core_Invoke {
     // to issue its own warning
     $coreMaintenanceMode = \Civi::settings()->get('core_maintenance_mode');
     if ($coreMaintenanceMode && ($coreMaintenanceMode !== 'inherit')) {
-      \CRM_Core_Session::setStatus(ts('CiviCRM is currently in maintenance mode. To deactivate, update the <code>core_maintenance_mode</code> setting.'), ts('Maintenance Mode'), 'warning');
+      \CRM_Core_Session::setStatus(\Civi\Core\MaintenanceMode::getAdminWarning(), ts('Maintenance Mode'), 'warning');
     }
   }
 
@@ -291,7 +291,7 @@ class CRM_Core_Invoke {
       'ext' => TRUE,
       'files' => TRUE,
       'tables' => TRUE,
-      'sessions' => $sessionReset || CRM_Utils_Request::retrieve('sessionReset', 'Boolean', CRM_Core_DAO::$_nullObject, FALSE, 0, 'GET'),
+      'sessions' => $sessionReset || CRM_Utils_Request::retrieve('sessionReset', 'Boolean', NULL, FALSE, 0, 'GET'),
       'metadata' => TRUE,
       'navigation' => TRUE,
       'router' => TRUE,
@@ -301,7 +301,7 @@ class CRM_Core_Invoke {
       'strings' => TRUE,
       'settings' => TRUE,
       'cases' => TRUE,
-      'triggers' => $triggerRebuild || CRM_Utils_Request::retrieve('triggerRebuild', 'Boolean', CRM_Core_DAO::$_nullObject, FALSE, 0, 'GET'),
+      'triggers' => $triggerRebuild || CRM_Utils_Request::retrieve('triggerRebuild', 'Boolean', NULL, FALSE, 0, 'GET'),
       'entities' => TRUE,
     ])->execute();
 

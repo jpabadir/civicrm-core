@@ -22,7 +22,6 @@ use CRM_Core_Config;
 use CRM_Core_DAO;
 use CRM_Core_DAO_AllCoreTables;
 use CRM_Core_ManagedEntities;
-use CRM_Core_Menu;
 use CRM_Core_OptionGroup;
 use CRM_Core_Resources;
 use CRM_Core_Session;
@@ -184,10 +183,12 @@ class Rebuilder {
       $session->reset(2);
     }
     if (!empty($targets['router'])) {
-      CRM_Core_Menu::clear();
+      Civi::router()->clear();
       // TODO: remove this, it shouldn't be needed immediately and
       // may be wasteful
-      CRM_Core_Menu::rebuild();
+      Civi::router()->rebuild();
+      // Rebuild CMS routes only after CiviCRM's menu data has been refreshed.
+      $config->userSystem->invalidateRouteCache();
     }
     if (!empty($targets['navigation'])) {
       Civi::cache('navigation')->flush();
@@ -210,11 +211,6 @@ class Rebuilder {
     }
     if (!empty($targets['triggers'])) {
       Civi::service('sql_triggers')->rebuild();
-      // (1) Rebuild Drupal 8/9/10 route cache only if "triggerRebuild" is set to TRUE as it's
-      // computationally very expensive and only needs to be done when routes change on the Civi-side.
-      // For example - when uninstalling an extension. We already set "triggerRebuild" to true for these operations.
-      // (2) FIXME: That ^^ seems silly now. Shouldn't it go under $targets['menu']?
-      $config->userSystem->invalidateRouteCache();
     }
     if (!empty($targets['entities'])) {
       CRM_Core_ManagedEntities::singleton(TRUE)->reconcile();

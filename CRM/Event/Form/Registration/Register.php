@@ -193,7 +193,7 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
     if (!empty($this->_fields)) {
       //load default campaign from page.
       if (array_key_exists('participant_campaign_id', $this->_fields)) {
-        $this->_defaults['participant_campaign_id'] = $this->_values['event']['campaign_id'] ?? NULL;
+        $this->_defaults['participant_campaign_id'] = $this->getCampaignID(0);
       }
 
       foreach ($this->_fields as $name => $field) {
@@ -204,24 +204,6 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
               NULL, CRM_Profile_Form::MODE_REGISTER
             );
           }
-        }
-      }
-    }
-
-    //fix for CRM-3088, default value for discount set.
-    $discountId = NULL;
-    if (!empty($this->_values['discount'])) {
-      $discountId = CRM_Core_BAO_Discount::findSet($this->_eventId, 'civicrm_event');
-      if ($discountId) {
-        if (isset($this->_values['event']['default_discount_fee_id'])) {
-          $discountKey = CRM_Core_DAO::getFieldValue('CRM_Core_DAO_OptionValue',
-            $this->_values['event']['default_discount_fee_id'],
-            'weight', 'id'
-          );
-
-          $this->_defaults['amount'] = key(array_slice($this->_values['discount'][$discountId],
-            $discountKey - 1, $discountKey, TRUE
-          ));
         }
       }
     }
@@ -687,14 +669,6 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
       CRM_Contact_BAO_Contact::processImageParams($params);
     }
 
-    //carry campaign to partcipants.
-    if (array_key_exists('participant_campaign_id', $params)) {
-      $params['campaign_id'] = $params['participant_campaign_id'];
-    }
-    else {
-      $params['campaign_id'] = $this->_values['event']['campaign_id'] ?? NULL;
-    }
-
     //hack to allow group to register w/ waiting
     $primaryParticipantCount = $this->getParticipantCount($params);
 
@@ -715,50 +689,24 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
       $params['participant_id'] = $this->_participantId;
     }
 
-    $params['defaultRole'] = 1;
-    if (array_key_exists('participant_role', $params)) {
-      $params['participant_role_id'] = $params['participant_role'];
-    }
-
-    if (array_key_exists('participant_role_id', $params)) {
-      $params['defaultRole'] = 0;
-    }
-    if (empty($params['participant_role_id']) &&
-      $this->_values['event']['default_role_id']
-    ) {
-      $params['participant_role_id'] = $this->_values['event']['default_role_id'];
-    }
-
     $params['currencyID'] = $this->getCurrency();
 
     if ($this->isPaidEvent()) {
       // we first reset the confirm page so it accepts new values
       $this->controller->resetPage('Confirm');
 
-      //added for discount
-      $discountId = CRM_Core_BAO_Discount::findSet($this->_eventId, 'civicrm_event');
-      $params['amount_level'] = $this->getAmountLevel($params, $discountId);
-      if (!empty($this->_values['discount'][$discountId])) {
-        $params['discount_id'] = $discountId;
-        $params['amount'] = $this->_values['discount'][$discountId][$params['amount']]['value'];
+      $lineItem = [];
+      CRM_Price_BAO_PriceSet::processAmount($this->_values['fee'], $params, $lineItem);
+      $submittedLineItems = $this->get('lineItem');
+      if (!empty($submittedLineItems) && is_array($submittedLineItems)) {
+        $submittedLineItems[0] = $lineItem;
       }
       else {
-        $lineItem = [];
-        CRM_Price_BAO_PriceSet::processAmount($this->_values['fee'], $params, $lineItem);
-        if ($params['tax_amount']) {
-          $this->set('tax_amount', $params['tax_amount']);
-        }
-        $submittedLineItems = $this->get('lineItem');
-        if (!empty($submittedLineItems) && is_array($submittedLineItems)) {
-          $submittedLineItems[0] = $lineItem;
-        }
-        else {
-          $submittedLineItems = [$lineItem];
-        }
-        $submittedLineItems = array_filter($submittedLineItems);
-        $this->set('lineItem', $submittedLineItems);
-        $this->set('lineItemParticipantsCount', [$primaryParticipantCount]);
+        $submittedLineItems = [$lineItem];
       }
+      $submittedLineItems = array_filter($submittedLineItems);
+      $this->set('lineItem', $submittedLineItems);
+      $this->set('lineItemParticipantsCount', [$primaryParticipantCount]);
 
       $this->set('amount', $params['amount'] ?? 0);
       $this->set('amount_level', $params['amount_level']);
@@ -837,8 +785,6 @@ class CRM_Event_Form_Registration_Register extends CRM_Event_Form_Registration {
       }
     }
     else {
-      $params['description'] = ts('Online Event Registration') . ' ' . $this->_values['event']['title'];
-
       $this->_params = [];
       $this->_params[] = $params;
       $this->set('params', $this->_params);

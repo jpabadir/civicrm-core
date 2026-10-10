@@ -731,12 +731,11 @@ class CRM_Contribute_Form_Contribution extends CRM_Contribute_Form_AbstractEditP
     if (!$this->_mode) {
       // payment_instrument isn't required in edit and will not be present when payment block is enabled.
       $required = !$this->_id;
-      $checkPaymentID = CRM_Core_PseudoConstant::getKey('CRM_Contribute_BAO_Contribution', 'payment_instrument_id', 'Check');
       $paymentInstrument = $this->add('select', 'payment_instrument_id',
         ts('Payment Method'),
         ['' => ts('- select -')] + CRM_Contribute_BAO_Contribution::buildOptions('payment_instrument_id', 'create', ['filter' => 0]),
         $required,
-        ['onChange' => "return showHideByValue('payment_instrument_id','{$checkPaymentID}','checkNumber','table-row','select',false);", 'class' => 'crm-select2']
+        ['class' => 'crm-select2']
       );
     }
 
@@ -826,6 +825,7 @@ class CRM_Contribute_Form_Contribution extends CRM_Contribute_Form_AbstractEditP
           NULL,
           ['onchange' => 'buildAmount( this.value, ' . json_encode($financialTypeIds) . ');', 'class' => 'crm-select2']
         );
+        $element->setOptionTextEscaped();
         if ($this->_online && !($this->_action & CRM_Core_Action::UPDATE)) {
           $element->freeze();
         }
@@ -989,16 +989,14 @@ class CRM_Contribute_Form_Contribution extends CRM_Contribute_Form_AbstractEditP
    * Build the price set form.
    */
   private function buildPriceSet(): void {
-    $form = $this;
-    $this->_priceSet = $this->getOrder()->getPriceSetMetadata();
-    foreach ($this->getPriceFieldMetaData() as $id => $field) {
+    foreach ($this->getPriceFieldMetaData() as $field) {
       $options = $field['options'] ?? NULL;
       if (!is_array($options)) {
         continue;
       }
 
       if (!empty($options)) {
-        CRM_Price_BAO_PriceField::addQuickFormElement($form,
+        CRM_Price_BAO_PriceField::addQuickFormElement($this,
           'price_' . $field['id'],
           $field['id'],
           FALSE,
@@ -1008,7 +1006,7 @@ class CRM_Contribute_Form_Contribution extends CRM_Contribute_Form_AbstractEditP
         );
       }
     }
-    $form->assign('priceSet', $form->_priceSet);
+    $this->assign('priceSet', $this->getOrder()->getPriceSetMetadata());
   }
 
   /**
@@ -1239,7 +1237,6 @@ class CRM_Contribute_Form_Contribution extends CRM_Contribute_Form_AbstractEditP
     // so we copy stuff over to first_name etc.
     $paymentParams = $this->prepareParamsForPaymentProcessor($this->_params);
     $paymentParams['contactID'] = $contactID;
-    CRM_Core_Payment_Form::mapParams(NULL, $this->_params, $paymentParams, TRUE);
 
     $financialType = new CRM_Financial_DAO_FinancialType();
     $financialType->id = $params['financial_type_id'];
@@ -1942,12 +1939,6 @@ class CRM_Contribute_Form_Contribution extends CRM_Contribute_Form_AbstractEditP
       }
     }
 
-    // Process price set and get total amount and line items - @todo the following lines should be obsolete.
-    if ($this->isQuickConfig() && !$this->_id) {
-      // @todo - probably these lines are not required.
-      $this->_priceSetId = $priceSetId = CRM_Core_DAO::getFieldValue('CRM_Price_DAO_PriceSet', 'default_contribution_amount', 'id', 'name');
-      $this->_priceSet = current(CRM_Price_BAO_PriceSet::getSetDetail($priceSetId));
-    }
     $submittedValues['total_amount'] = $this->getOrder()->getTotalAmount();
     // @todo - ideally do not set tax_level - it is not required lower down
     // if line items are provide appropriately. The BAO prefers to self-calculate tax.

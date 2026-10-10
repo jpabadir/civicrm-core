@@ -797,7 +797,7 @@ abstract class AbstractRunAction extends \Civi\Api4\Generic\AbstractAction {
 
     $result = NULL;
     if ($routeName = parse_url($pathExpr, PHP_URL_PATH)) {
-      if ($routeItem = \CRM_Core_Menu::get($routeName)) {
+      if ($routeItem = \Civi::router()->get($routeName)) {
         if (!empty($routeItem['page_callback'])) {
           $result = \CRM_Core_Key::get($routeItem['page_callback']);
         }
@@ -1487,7 +1487,7 @@ abstract class AbstractRunAction extends \Civi\Api4\Generic\AbstractAction {
       case 'Date':
       case 'Timestamp':
         if ($format) {
-          $dateFormat = \Civi::settings()->get($format);
+          $dateFormat = str_starts_with($format, 'dateformat') ? \Civi::settings()->get($format) : $format;
         }
         $formatted = \CRM_Utils_Date::customFormat($rawValue, $dateFormat ?? NULL);
     }

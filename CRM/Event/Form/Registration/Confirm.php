@@ -79,7 +79,6 @@ class CRM_Event_Form_Registration_Confirm extends CRM_Event_Form_Registration {
     $this->_lineItem = $this->get('lineItem');
 
     $this->_params = $this->get('params');
-    $this->_params[0]['tax_amount'] = $this->get('tax_amount');
 
     $this->_params[0]['is_pay_later'] = $this->isPayLater();
     $this->assign('is_pay_later', $this->_params[0]['is_pay_later']);
@@ -96,17 +95,6 @@ class CRM_Event_Form_Registration_Confirm extends CRM_Event_Form_Registration {
     if ($this->isPaidEvent()) {
       $this->_params[0]['invoiceID'] = $this->get('invoiceID');
     }
-    $this->assign('defaultRole', FALSE);
-    if (($this->_params[0]['defaultRole'] ?? NULL) == 1) {
-      $this->assign('defaultRole', TRUE);
-    }
-
-    if (empty($this->_params[0]['participant_role_id']) &&
-      $this->_values['event']['default_role_id']
-    ) {
-      $this->_params[0]['participant_role_id'] = $this->_values['event']['default_role_id'];
-    }
-
     if (isset($this->_values['event']['confirm_title'])) {
       $this->setTitle($this->_values['event']['confirm_title']);
     }
@@ -519,25 +507,10 @@ class CRM_Event_Form_Registration_Confirm extends CRM_Event_Form_Registration {
         CRM_Core_Session::singleton()->set('transaction.userID', $contactID);
       }
 
-      $participantRecord['description'] = ts('Online Event Registration') . ': ' . $this->_values['event']['title'];
       $participantRecord['accountingCode'] = $this->_values['event']['accountingCode'] ?? NULL;
 
       $pending = FALSE;
-      if ($this->_allowWaitlist || $this->_requireApproval) {
-        //get the participant statuses.
-        $waitingStatuses = CRM_Event_PseudoConstant::participantStatus(NULL, "class = 'Waiting'");
-        if ($this->_allowWaitlist) {
-          $participantRecord['participant_status_id'] = $participantRecord['participant_status'] = array_search('On waitlist', $waitingStatuses);
-        }
-        else {
-          $participantRecord['participant_status_id'] = $participantRecord['participant_status'] = array_search('Awaiting approval', $waitingStatuses);
-        }
-
-        //there might be case user selected pay later and
-        //now becomes part of run time waiting list.
-        $participantRecord['is_pay_later'] = FALSE;
-      }
-      elseif ($this->isPaidEvent()) {
+      if (!($this->_allowWaitlist || $this->_requireApproval) && $this->isPaidEvent()) {
         // required only if paid event
         if (is_array($this->_paymentProcessor)) {
           $payment = $this->_paymentProcessor['object'];
@@ -554,10 +527,6 @@ class CRM_Event_Form_Registration_Confirm extends CRM_Event_Form_Registration {
         ) {
           if ($participantRecord['amount'] != 0) {
             $pending = TRUE;
-            //get the participant statuses.
-            $pendingStatuses = CRM_Event_PseudoConstant::participantStatus(NULL, "class = 'Pending'");
-            $status = !empty($participantRecord['is_pay_later']) ? 'Pending from pay later' : 'Pending from incomplete transaction';
-            $participantRecord['participant_status_id'] = $participantRecord['participant_status'] = array_search($status, $pendingStatuses);
           }
         }
         elseif (!empty($participantRecord['is_primary'])) {
@@ -872,9 +841,9 @@ class CRM_Event_Form_Registration_Confirm extends CRM_Event_Form_Registration {
       'amount_level' => $params['amount_level'],
       'invoice_id' => $params['invoiceID'],
       'currency' => $this->getCurrency(),
-      'source' => !empty($params['participant_source']) ? $params['participant_source'] : $params['description'],
+      'source' => $this->getSource(0),
       'is_pay_later' => $params['is_pay_later'] ?? 0,
-      'campaign_id' => $params['campaign_id'] ?? NULL,
+      'campaign_id' => $this->getCampaignID(0),
       'card_type_id' => $this->getCardTypeID(),
       'pan_truncation' => $this->getPanTruncation(),
       // The ternary is probably redundant - paymentProcessor should always be set.

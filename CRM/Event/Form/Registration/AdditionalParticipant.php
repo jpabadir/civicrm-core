@@ -95,7 +95,7 @@ class CRM_Event_Form_Registration_AdditionalParticipant extends CRM_Event_Form_R
   public function preProcess() {
     parent::preProcess();
     $this->addExpectedSmartyVariable('additionalCustomPost');
-    $participantNo = substr($this->_name, 12);
+    $participantNo = $this->getParticipantIndex();
 
     //lets process in-queue participants.
     if ($this->_participantId && $this->_additionalParticipantIds) {
@@ -128,16 +128,6 @@ class CRM_Event_Form_Registration_AdditionalParticipant extends CRM_Event_Form_R
    */
   public function setDefaultValues() {
     $defaults = $unsetSubmittedOptions = [];
-    $discountId = NULL;
-    //fix for CRM-3088, default value for discount set.
-    if (!empty($this->_values['discount'])) {
-      $discountId = CRM_Core_BAO_Discount::findSet($this->_eventId, 'civicrm_event');
-      if ($discountId && !empty($this->_values['event']['default_discount_fee_id'])) {
-        $discountKey = CRM_Core_DAO::getFieldValue("CRM_Core_DAO_OptionValue", $this->_values['event']['default_discount_fee_id'], 'weight', 'id'
-        );
-        $defaults['amount'] = key(array_slice($this->_values['discount'][$discountId], $discountKey - 1, $discountKey, TRUE));
-      }
-    }
     if ($this->_priceSetId) {
       foreach ($this->getPriceFieldMetaData() as $key => $val) {
         if (empty($val['options'])) {
@@ -187,7 +177,7 @@ class CRM_Event_Form_Registration_AdditionalParticipant extends CRM_Event_Form_R
 
     //load default campaign from page.
     if (array_key_exists('participant_campaign_id', $this->_fields)) {
-      $defaults['participant_campaign_id'] = $this->_values['event']['campaign_id'] ?? NULL;
+      $defaults['participant_campaign_id'] = $this->getCampaignID($this->getParticipantIndex());
     }
 
     //CRM-17865 set custom field defaults
@@ -212,11 +202,8 @@ class CRM_Event_Form_Registration_AdditionalParticipant extends CRM_Event_Form_R
    * @return void
    */
   public function buildQuickForm() {
-
-    $button = substr($this->controller->getButtonName($this->_name), -4);
-
     if ($this->isPaidEvent()) {
-      $this->buildAmount(TRUE, NULL, $this->_priceSetId);
+      $this->buildAmount();
     }
     $this->assign('priceSet', $this->_priceSet);
 
@@ -445,7 +432,7 @@ class CRM_Event_Form_Registration_AdditionalParticipant extends CRM_Event_Form_R
       $params = $self->get('params');
 
       //take the participant instance.
-      $addParticipantNum = substr($self->_name, 12);
+      $addParticipantNum = $self->getParticipantIndex();
 
       if (is_array($params)) {
         foreach ($params as $key => $value) {
@@ -637,14 +624,6 @@ class CRM_Event_Form_Registration_AdditionalParticipant extends CRM_Event_Form_R
     if (!empty($params['image_URL'])) {
       CRM_Contact_BAO_Contact::processImageParams($params);
     }
-    //carry campaign to partcipants.
-    if (array_key_exists('participant_campaign_id', $params)) {
-      $params['campaign_id'] = $params['participant_campaign_id'];
-    }
-    else {
-      $params['campaign_id'] = $this->_values['event']['campaign_id'] ?? NULL;
-    }
-
     // if waiting is enabled
     if (!$this->_allowConfirmation &&
       is_numeric($this->_availableRegistrations)
@@ -696,33 +675,16 @@ class CRM_Event_Form_Registration_AdditionalParticipant extends CRM_Event_Form_R
 
       if ($this->isPaidEvent()) {
 
-        //added for discount
-        $discountId = CRM_Core_BAO_Discount::findSet($this->getEventID(), 'civicrm_event');
-        $params['amount_level'] = $this->getAmountLevel($params, $discountId);
-        if (!empty($this->_values['discount'][$discountId])) {
-          $params['discount_id'] = $discountId;
-          $params['amount'] = $this->_values['discount'][$discountId][$params['amount']]['value'];
-        }
-        else {
-          $lineItem = [];
-          CRM_Price_BAO_PriceSet::processAmount($this->_values['fee'], $params, $lineItem);
+        $lineItem = [];
+        CRM_Price_BAO_PriceSet::processAmount($this->_values['fee'], $params, $lineItem);
 
-          //build line item array..
-          //if requireApproval/waitlist is enabled we hide fees for primary participant
-          // (and not for additional participant which might be is a bug)
-          //lineItem are not correctly build for primary participant
-          //this results in redundancy since now lineItems for additional participant will be build against primary participantNum
-          //therefore lineItems must always be build against current participant No
-          $this->_lineItem[$addParticipantNum] = $lineItem;
-        }
-      }
-
-      if (array_key_exists('participant_role', $params)) {
-        $params['participant_role_id'] = $params['participant_role'];
-      }
-
-      if (empty($params['participant_role_id']) && $this->_values['event']['default_role_id']) {
-        $params['participant_role_id'] = $this->_values['event']['default_role_id'];
+        //build line item array..
+        //if requireApproval/waitlist is enabled we hide fees for primary participant
+        // (and not for additional participant which might be is a bug)
+        //lineItem are not correctly build for primary participant
+        //this results in redundancy since now lineItems for additional participant will be build against primary participantNum
+        //therefore lineItems must always be build against current participant No
+        $this->_lineItem[$addParticipantNum] = $lineItem;
       }
 
       if ($this->isPayLater()) {

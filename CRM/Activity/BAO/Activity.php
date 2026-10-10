@@ -360,7 +360,7 @@ class CRM_Activity_BAO_Activity extends CRM_Activity_DAO_Activity {
       $wheres = [];
       foreach ($activityContacts as $recordTypeID => $contactIDs) {
         if (!empty($contactIDs)) {
-          $wheres[$key] = "(record_type_id = $recordTypeID AND contact_id IN (" . implode(',', $contactIDs) . '))';
+          $wheres[$recordTypeID] = "(record_type_id = $recordTypeID AND contact_id IN (" . implode(',', $contactIDs) . '))';
         }
       }
       $existingArray = empty($wheres) ? [] : CRM_Core_DAO::executeQuery("
@@ -375,11 +375,7 @@ class CRM_Activity_BAO_Activity extends CRM_Activity_DAO_Activity {
 
       foreach ($existingArray as $existingRecords) {
         $recordsToKeep[$existingRecords['id']] = ['contact_id' => $existingRecords['contact_id'], 'record_type_id' => $existingRecords['record_type_id']];
-        unset($activityContacts[$recordTypeID][$existingRecords['contact_id']]);
-        if (empty($activityContacts[$recordTypeID])) {
-          // If we just removed the last one to update then also unset the key.
-          unset($activityContacts[$recordTypeID]);
-        }
+        unset($activityContacts[$existingRecords['record_type_id']][$existingRecords['contact_id']]);
       }
 
       if (!empty($recordsToKeep)) {
@@ -388,7 +384,7 @@ class CRM_Activity_BAO_Activity extends CRM_Activity_DAO_Activity {
 
       // Delete all existing records for the types to be updated. Do a quick check to make sure there
       // is at least one to avoid a delete query if not necessary (delete queries are more likely to cause contention).
-      if (ActivityContact::get($params['check_permissions'] ?? FALSE)->setLimit(1)->setWhere($wheres)->selectRowCount()->execute()) {
+      if (ActivityContact::get($params['check_permissions'] ?? FALSE)->setLimit(1)->setWhere($wheres)->selectRowCount()->execute()->count()) {
         ActivityContact::delete($params['check_permissions'] ?? FALSE)->setWhere($wheres)->execute();
       }
     }

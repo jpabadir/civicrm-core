@@ -1659,8 +1659,7 @@ class CiviUnitTestCaseCommon extends PHPUnit\Framework\TestCase {
     ], $params);
 
     $result = $this->callAPISuccess('custom_field', 'create', $params);
-    // these 2 functions are called with force to flush static caches
-    CRM_Core_BAO_CustomField::getTableColumnGroup($result['id'], 1);
+    // Call getEnabledComponents with force to flush static caches
     CRM_Core_Component::getEnabledComponents(1);
     return $result;
   }
@@ -4037,6 +4036,42 @@ WHERE table_schema = DATABASE()");
       ->execute()->first()['data'];
     unset($data['id']);
     return $data;
+  }
+
+  /**
+   * Execute a callback. Capture and return any PHP errors (which match the given filter).
+   *
+   * @param int $errorMask
+   *   Ex: E_USER_DEPRECATED|E_DEPRECATED
+   * @param callable $callback
+   * @return string[]
+   */
+  public static function captureErrors(int $errorMask, callable $callback): array {
+    $deprecations = [];
+
+    $previousHandler = set_error_handler(
+      function (int $errno, string $errstr, string $errfile = '', int $errline = 0) use (&$deprecations, &$previousHandler, $errorMask) {
+        if ($errno & $errorMask) {
+          $deprecations[] = $errstr;
+          return TRUE;
+        }
+        elseif ($previousHandler !== NULL) {
+          return (bool) $previousHandler($errno, $errstr, $errfile, $errline);
+        }
+        else {
+          return FALSE;
+        }
+      }
+    );
+
+    try {
+      $callback();
+    }
+    finally {
+      restore_error_handler();
+    }
+
+    return $deprecations;
   }
 
 }

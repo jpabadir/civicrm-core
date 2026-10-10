@@ -49,13 +49,10 @@ class CRM_Member_BAO_Membership extends CRM_Member_DAO_Membership {
    */
   public static function add(&$params) {
     $oldStatus = $oldType = NULL;
-    if ($params['id']) {
-      CRM_Utils_Hook::pre('edit', 'Membership', $params['id'], $params);
-    }
-    else {
-      CRM_Utils_Hook::pre('create', 'Membership', NULL, $params);
-    }
-    $id = $params['id'];
+    $hook = !empty($params['id']) ? 'edit' : 'create';
+    CRM_Utils_Hook::pre($hook, 'Membership', $params['id'] ?? NULL, $params);
+    $id = $params['id'] ?? NULL;
+
     // we do this after the hooks are called in case it has been altered
     if ($id) {
       $membershipObj = new CRM_Member_DAO_Membership();
@@ -205,16 +202,14 @@ class CRM_Member_BAO_Membership extends CRM_Member_DAO_Membership {
    * Takes an associative array and creates a membership object.
    *
    * @param array $params
-   *   (reference ) an assoc array of name/value pairs.
-   * @param array $ids
-   *   Deprecated parameter The array that holds all the db ids.
+   *   array of name/value pairs.
    *
-   * @return CRM_Member_BAO_Membership|CRM_Core_Error
+   * @return CRM_Member_BAO_Membership
    * @throws \CRM_Core_Exception
    *
    * @throws CRM_Core_Exception
    */
-  public static function create(&$params, $ids = []) {
+  public static function create($params) {
     $isLifeTime = FALSE;
     if (!empty($params['membership_type_id'])) {
       $memTypeDetails = CRM_Member_BAO_MembershipType::getMembershipType($params['membership_type_id']);
@@ -299,7 +294,6 @@ class CRM_Member_BAO_Membership extends CRM_Member_DAO_Membership {
 
     $transaction = new CRM_Core_Transaction();
 
-    $params['id'] ??= $ids['membership'] ?? NULL;
     $membership = self::add($params);
 
     $params['membership_id'] = $membership->id;
@@ -320,56 +314,27 @@ class CRM_Member_BAO_Membership extends CRM_Member_DAO_Membership {
         ->execute()->count();
 
       if (!$hasContributionLineItem) {
-        // This code ensures a line item is created but it is recommended you pass in 'skipLineItem' or 'line_item'
+        // This code ensures a line item is created but it is recommended you use apiv4 and handle line items via Order api.
         if (empty($params['line_item']) && !empty($params['membership_type_id']) && empty($params['skipLineItem'])) {
-          CRM_Price_BAO_LineItem::getLineItemArray($params, NULL, 'membership', $params['membership_type_id']);
+          $lineItem = self::getDefaultLineItem((int) $params['membership_type_id'], $membership->id);
+          if ($lineItem) {
+            LineItem::save(FALSE)->addRecord($lineItem)->execute();
+          }
         }
-        $params['skipLineItem'] = TRUE;
-
-        // Record contribution for this membership and create a MembershipPayment
-        // @todo deprecate this.
+        if (!empty($params['total_amount'])) {
+          CRM_Core_Error::deprecatedWarning('total_amount is not respected when auto-creating a default line item for a membership with no price set - pass line_item instead');
+        }
         if (!empty($params['contribution_status_id'])) {
           CRM_Core_Error::deprecatedWarning('creating a contribution via membership BAO is no longer possible');
         }
-
-        // If the membership has no associated contribution then we ensure
-        // the line items are 'correct' here. This is a lazy legacy
-        // hack whereby they are deleted and recreated
+        if (!empty($params['contribution'])) {
+          CRM_Core_Error::deprecatedWarning('passing contribution into Membership Create is non-functional and deprecated - use the Order api to get the line items right.');
+        }
         if (!empty($params['lineItems'])) {
           CRM_Core_Error::deprecatedWarning('do not pass in lineItems');
-          $params['line_item'] = $params['lineItems'];
         }
-        // do cleanup line items if membership edit the Membership type.
-        if (!empty($ids['membership'])) {
-          CRM_Price_BAO_LineItem::deleteLineItems($ids['membership'], 'civicrm_membership');
-        }
-        // @todo - we should ONLY do the below if a contribution is created. Let's
-        // get some deprecation notices in here & see where it's hit & work to eliminate.
-        // This could happen if there is no contribution or we are in one of many
-        // weird and wonderful flows. This is scary code. Keep adding tests.
         if (!empty($params['line_item']) && empty($params['contribution_id'])) {
-          foreach ($params['line_item'] as $lineItems) {
-            foreach ($lineItems as $lineItem) {
-              $lineMembershipType = $lineItem['membership_type_id'] ?? NULL;
-              if (!empty($params['contribution'])) {
-                CRM_Core_Error::deprecatedWarning('passing contribution into Membership Create is non-functional and deprecated - use the Order api to get the line items right.');
-              }
-              if ($lineMembershipType && $lineMembershipType == ($params['membership_type_id'] ?? NULL)) {
-                $lineItem['entity_id'] = $membership->id;
-                $lineItem['entity_table'] = 'civicrm_membership';
-              }
-              if (empty($lineItem['entity_table'])) {
-                $lineItem['entity_table'] = 'civicrm_contribution';
-              }
-              if (empty($lineItem['entity_id'])) {
-                $lineItem['entity_id'] = $membership->id;
-              }
-              if (!empty($lineItem['price_field_value_id']) && empty($lineItem['financial_type_id'])) {
-                $lineItem['financial_type_id'] = CRM_Core_DAO::getFieldValue('CRM_Price_DAO_PriceFieldValue', $lineItem['price_field_value_id'], 'financial_type_id');
-              }
-              LineItem::save(FALSE)->addRecord($lineItem)->execute();
-            }
-          }
+          CRM_Core_Error::deprecatedWarning('passing line_item into Membership Create is non-functional and deprecated - use the Order api to get the line items right.');
         }
       }
     }
@@ -383,6 +348,48 @@ class CRM_Member_BAO_Membership extends CRM_Member_DAO_Membership {
     }
 
     return $membership;
+  }
+
+  /**
+   * Get the single line item for a new membership created with no price
+   * set or line items supplied (ie. not via the Order api).
+   *
+   * Built from the membership type's own entry in the
+   * 'default_membership_type_amount' price set - see
+   * CRM_Price_BAO_PriceSet::getDefaultPriceSet().
+   *
+   * @param int $membershipTypeID
+   * @param int $membershipID
+   *
+   * @return array|null
+   * @throws \CRM_Core_Exception
+   */
+  private static function getDefaultLineItem(int $membershipTypeID, int $membershipID): ?array {
+    $priceFieldValue = PriceFieldValue::get(FALSE)
+      ->addSelect('id', 'price_field_id', 'label', 'financial_type_id', 'amount')
+      ->addWhere('membership_type_id', '=', $membershipTypeID)
+      ->addWhere('price_field_id.price_set_id.name', '=', 'default_membership_type_amount')
+      ->execute()->first();
+    if (!$priceFieldValue) {
+      return NULL;
+    }
+    $totalAmount = (float) $priceFieldValue['amount'];
+    $financialTypeID = $priceFieldValue['financial_type_id'];
+    $taxRate = CRM_Core_PseudoConstant::getTaxRates()[$financialTypeID] ?? 0;
+    $taxAmount = ($taxRate / 100) * $totalAmount / (1 + ($taxRate / 100));
+    return [
+      'price_field_id' => $priceFieldValue['price_field_id'],
+      'price_field_value_id' => $priceFieldValue['id'],
+      'label' => $priceFieldValue['label'],
+      'qty' => 1,
+      'unit_price' => $totalAmount - $taxAmount,
+      'line_total' => $totalAmount - $taxAmount,
+      'financial_type_id' => $financialTypeID,
+      'membership_type_id' => $membershipTypeID,
+      'tax_amount' => $taxAmount,
+      'entity_id' => $membershipID,
+      'entity_table' => 'civicrm_membership',
+    ];
   }
 
   /**
